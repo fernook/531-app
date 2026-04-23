@@ -1,4 +1,4 @@
-const CACHE = '531-v1';
+const CACHE = '531-v2';
 const ASSETS = ['./', './index.html', './app.js', './styles.css', './manifest.json', './icon.svg'];
 
 self.addEventListener('install', (e) => {

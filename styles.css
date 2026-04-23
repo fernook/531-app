@@ -197,6 +197,16 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; marg
   color: var(--muted);
   margin-top: 4px;
 }
+.step .plates {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 4px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.2px;
+}
+.step .plates.warn {
+  color: var(--warn);
+}
 
 .add-fsl {
   width: 100%;

@@ -61,6 +61,44 @@ const weekSchemes = {
 const round5 = (w) => Math.floor(w / 5) * 5;
 const fmtPct = (p) => `${Math.round(p * 100)}%`;
 
+// ---------- Plate math ----------
+// User's physical inventory, expressed as pairs available per side (loading is symmetric).
+// Edit these counts when plates are added/removed. Largest first.
+// NOTE: user has 1 lone 2.5 lb plate — unusable for symmetric loading, so 2.5s are omitted.
+const BAR = 45;
+const PLATES_PER_SIDE = [
+  { weight: 45, count: 2 },
+  { weight: 35, count: 1 },
+  { weight: 25, count: 1 },
+  { weight: 10, count: 1 },
+  { weight: 5,  count: 2 },
+];
+
+function plateMath(total) {
+  if (total < BAR) return { ok: false, reason: `Below bar (${BAR})`, per: [] };
+  if (total === BAR) return { ok: true, bar: true, per: [] };
+  let remaining = (total - BAR) / 2;
+  const per = [];
+  for (const { weight, count } of PLATES_PER_SIDE) {
+    const n = Math.min(count, Math.floor(remaining / weight + 1e-9));
+    if (n > 0) per.push({ weight, n });
+    remaining -= n * weight;
+  }
+  remaining = Math.round(remaining * 100) / 100;
+  if (remaining > 0.01) return { ok: false, reason: `Short ${remaining} lb/side`, short: remaining, per };
+  return { ok: true, per };
+}
+
+function formatPlates(pm) {
+  if (pm.ok && pm.bar) return 'Bar only';
+  const parts = pm.per.map(({ weight, n }) => n > 1 ? `${n}×${weight}` : `${weight}`);
+  const list = parts.join(' + ');
+  if (pm.ok) return `${list} /side`;
+  if (parts.length === 0) return pm.reason;
+  const hint = Math.abs(pm.short - 2.5) < 0.01 ? 'buy a 2.5 lb pair' : 'buy more plates';
+  return `Closest: ${list} /side — short ${pm.short}, ${hint}`;
+}
+
 function nextDay() {
   if (state.daysDoneThisWeek.length === 0) return 1;
   if (state.daysDoneThisWeek.includes(1) && !state.daysDoneThisWeek.includes(2)) return 2;
@@ -622,9 +660,13 @@ function renderStep(step, blockIdx) {
     extra = el('div', { class: 'note' }, ['Optional (skip if fatigued)']);
   }
 
+  const pm = plateMath(step.weight);
+  const plates = el('div', { class: 'plates' + (pm.ok ? '' : ' warn') }, [formatPlates(pm)]);
+
   const body = el('div', { class: 'body' }, [
     el('div', { class: 'label' }, [step.kind === 'warmup' ? 'Warm-up' : step.label]),
     el('div', { class: 'main' }, [main]),
+    plates,
     extra,
   ]);
 
@@ -683,9 +725,11 @@ function renderAssistanceSetsBlock(b, idx) {
     const classes = ['step', 'fsl'];
     if (s.done) classes.push('done');
     const check = el('div', { class: 'check' }, [s.done ? '✓' : '']);
+    const pm = plateMath(s.weight);
     const body = el('div', { class: 'body' }, [
       el('div', { class: 'label' }, [s.label]),
       el('div', { class: 'main' }, [`${s.weight} × ${s.reps}`]),
+      el('div', { class: 'plates' + (pm.ok ? '' : ' warn') }, [formatPlates(pm)]),
     ]);
     const repInput = el('input', {
       type: 'number', inputmode: 'numeric', class: 'reps-input',
