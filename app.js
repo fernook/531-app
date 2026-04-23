@@ -3,7 +3,7 @@ const STATE_KEY = '531-state-v1';
 const SESSION_KEY = '531-session-v1';
 
 const defaultState = {
-  tms: { squat: 210, bench: 180, deadlift: 220, ohp: 120 },
+  tms: { squat: 135, bench: 95, deadlift: 135, ohp: 65 },
   cycle: 1,
   week: 1,                // 1..4
   daysDoneThisWeek: [],   // subset of [1, 2]
