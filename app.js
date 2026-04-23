@@ -64,14 +64,14 @@ const fmtPct = (p) => `${Math.round(p * 100)}%`;
 // ---------- Plate math ----------
 // User's physical inventory, expressed as pairs available per side (loading is symmetric).
 // Edit these counts when plates are added/removed. Largest first.
-// NOTE: user has 1 lone 2.5 lb plate — unusable for symmetric loading, so 2.5s are omitted.
 const BAR = 45;
 const PLATES_PER_SIDE = [
-  { weight: 45, count: 2 },
-  { weight: 35, count: 1 },
-  { weight: 25, count: 1 },
-  { weight: 10, count: 1 },
-  { weight: 5,  count: 2 },
+  { weight: 45,  count: 2 },
+  { weight: 35,  count: 1 },
+  { weight: 25,  count: 1 },
+  { weight: 10,  count: 1 },
+  { weight: 5,   count: 2 },
+  { weight: 2.5, count: 1 },
 ];
 
 function plateMath(total) {
