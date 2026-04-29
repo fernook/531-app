@@ -343,3 +343,110 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; marg
   margin-left: 6px;
 }
 .tag.ghost { background: var(--surface-2); color: var(--muted); }
+
+/* History delete */
+.history-row.deletable {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.history-row .h-main { flex: 1; min-width: 0; }
+.history-row .h-del {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  width: 38px;
+  height: 38px;
+  min-height: 38px;
+  padding: 0;
+  font-size: 16px;
+  color: var(--muted);
+  flex-shrink: 0;
+}
+
+/* Assistance editor (Settings) */
+.assist-day { margin-bottom: 18px; }
+.assist-day-label {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  margin: 4px 0 8px;
+}
+.assist-item {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px;
+  margin-bottom: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.assist-item .assist-name { font-weight: 600; }
+.assist-kind { display: flex; gap: 6px; }
+.assist-srw {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 8px;
+}
+.assist-srw .field { display: flex; flex-direction: column; gap: 4px; }
+.assist-srw .field label {
+  font-size: 11px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.assist-srw input { padding: 10px 10px; font-size: 16px; }
+.assist-bumps { display: flex; gap: 6px; }
+.assist-bumps button {
+  flex: 1;
+  padding: 6px 4px;
+  min-height: 36px;
+  font-size: 13px;
+}
+.assist-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: 2px;
+}
+.assist-optional {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  color: var(--muted);
+}
+.assist-optional input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+}
+
+/* Cycle-end confirmation modal */
+.cycle-confirm {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.cc-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto 100px;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: var(--surface-2);
+  border-radius: 10px;
+}
+.cc-name { font-weight: 600; }
+.cc-old { color: var(--muted); font-variant-numeric: tabular-nums; }
+.cc-arrow { color: var(--muted); }
+.cc-input {
+  text-align: center;
+  font-weight: 700;
+  font-size: 18px;
+  padding: 10px 8px;
+}

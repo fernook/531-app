@@ -4,10 +4,21 @@ const SESSION_KEY = '531-session-v1';
 
 const defaultState = {
   tms: { squat: 135, bench: 95, deadlift: 135, ohp: 65 },
+  increments: { squat: 10, bench: 5, deadlift: 10, ohp: 5 },
   cycle: 1,
   week: 1,                // 1..4
   daysDoneThisWeek: [],   // subset of [1, 2]
-  pullVariant: 'pullup',  // alternates each Day 1
+  assistance: {
+    1: [
+      { id: 'a-d1-pull', name: 'Pull-ups', kind: 'reps', target: '25–50 total reps', optional: false },
+      { id: 'a-d1-face', name: 'Face pulls / band pull-aparts', kind: 'reps', target: '30–50 total reps', optional: true },
+    ],
+    2: [
+      { id: 'a-d2-chin', name: 'Chin-ups', kind: 'reps', target: '25–50 total reps', optional: false },
+      { id: 'a-d2-row', name: 'Barbell rows', kind: 'sets', sets: 3, reps: '8–10', weight: 125, optional: false },
+      { id: 'a-d2-push', name: 'Dips or push-ups', kind: 'reps', target: '2–3 sets', optional: true },
+    ],
+  },
   history: [],            // sessions, newest last
 };
 
@@ -166,42 +177,33 @@ function buildSession(dayNum) {
     blocks.push(buildLiftBlock(lift, state.week, state.tms[lift]));
   });
 
-  if (dayNum === 1) {
-    blocks.push({
-      kind: 'assistance',
-      name: state.pullVariant === 'pullup' ? 'Pull-ups' : 'Chin-ups',
-      target: 'Total 25–50 reps, any rep scheme',
-      reps: null,
-      done: false,
-    });
-    blocks.push({
-      kind: 'assistance',
-      name: 'Face pulls / band pull-aparts',
-      target: '30–50 total reps',
-      reps: null,
-      done: false,
-      optional: true,
-    });
-  } else {
-    blocks.push({
-      kind: 'assistanceSets',
-      name: 'Barbell rows',
-      target: '3 × 8–10',
-      sets: [
-        { id: cryptoId(), label: 'Set 1', weight: 125, reps: '8–10', done: false },
-        { id: cryptoId(), label: 'Set 2', weight: 125, reps: '8–10', done: false },
-        { id: cryptoId(), label: 'Set 3', weight: 125, reps: '8–10', done: false },
-      ],
-    });
-    blocks.push({
-      kind: 'assistance',
-      name: 'Dips or push-ups',
-      target: '2–3 sets',
-      reps: null,
-      done: false,
-      optional: true,
-    });
-  }
+  (state.assistance[dayNum] || []).forEach((a) => {
+    if (a.kind === 'sets') {
+      const n = Math.max(1, parseInt(a.sets, 10) || 1);
+      blocks.push({
+        kind: 'assistanceSets',
+        name: a.name,
+        target: `${n} × ${a.reps}`,
+        optional: !!a.optional,
+        sets: Array.from({ length: n }, (_, i) => ({
+          id: cryptoId(),
+          label: `Set ${i + 1}`,
+          weight: Number(a.weight) || 0,
+          reps: a.reps,
+          done: false,
+        })),
+      });
+    } else {
+      blocks.push({
+        kind: 'assistance',
+        name: a.name,
+        target: a.target,
+        reps: null,
+        done: false,
+        optional: !!a.optional,
+      });
+    }
+  });
 
   return {
     cycle: state.cycle,
@@ -245,34 +247,81 @@ function cancelSession() {
 function finishSession() {
   // Build summary entry
   const summary = summariseSession(session);
+  summary.id = cryptoId();
   state.history.push(summary);
 
-  // Mark day done; rotate pull variant if Day 1 completed
-  if (session.day === 1) {
-    state.pullVariant = state.pullVariant === 'pullup' ? 'chinup' : 'pullup';
-  }
   if (!state.daysDoneThisWeek.includes(session.day)) state.daysDoneThisWeek.push(session.day);
 
-  // Advance week if both days done
-  if (state.daysDoneThisWeek.includes(1) && state.daysDoneThisWeek.includes(2)) {
+  const bothDone = state.daysDoneThisWeek.includes(1) && state.daysDoneThisWeek.includes(2);
+  const cycleEnding = bothDone && state.week === 4;
+
+  // Advance week if both days done (but defer the cycle-end TM bump to a modal)
+  if (bothDone && !cycleEnding) {
     state.daysDoneThisWeek = [];
-    if (state.week < 4) {
-      state.week += 1;
-    } else {
-      // Cycle complete — bump TMs (+5 upper, +10 lower), reset to week 1
-      state.cycle += 1;
-      state.week = 1;
-      Object.keys(state.tms).forEach((k) => {
-        state.tms[k] += lifts[k].type === 'upper' ? 5 : 10;
-      });
-    }
+    state.week += 1;
   }
 
   session = null;
   saveState();
   saveSession();
   view = 'home';
-  toast('Session logged');
+
+  if (cycleEnding) {
+    cycleCompleteModal();
+  } else {
+    toast('Session logged');
+    render();
+  }
+}
+
+function defaultIncrement(lift) {
+  return lifts[lift].type === 'upper' ? 5 : 10;
+}
+
+function cycleCompleteModal() {
+  const proposed = {};
+  Object.keys(state.tms).forEach((k) => {
+    const inc = state.increments && state.increments[k] != null ? state.increments[k] : defaultIncrement(k);
+    proposed[k] = state.tms[k] + inc;
+  });
+  modal = {
+    title: `Cycle ${state.cycle} complete`,
+    body: 'Confirm next cycle\'s training maxes. Edit any that should change differently based on how the cycle felt.',
+    persistent: true,
+    proposed,
+    content: () => {
+      const grid = el('div', { class: 'cycle-confirm' });
+      Object.entries(state.tms).forEach(([k, current]) => {
+        grid.appendChild(el('div', { class: 'cc-row' }, [
+          el('div', { class: 'cc-name' }, [lifts[k].name]),
+          el('div', { class: 'cc-old' }, [String(current)]),
+          el('div', { class: 'cc-arrow' }, ['→']),
+          el('input', {
+            type: 'number', inputmode: 'numeric', class: 'cc-input',
+            value: String(modal.proposed[k]),
+            onChange: (e) => {
+              const v = parseFloat(e.target.value);
+              if (Number.isFinite(v) && v >= 0) modal.proposed[k] = v;
+              render();
+            },
+          }),
+        ]));
+      });
+      return grid;
+    },
+    actions: [
+      { label: 'Start next cycle', kind: 'primary', onClick: () => {
+        Object.keys(modal.proposed).forEach((k) => { state.tms[k] = modal.proposed[k]; });
+        state.cycle += 1;
+        state.week = 1;
+        state.daysDoneThisWeek = [];
+        saveState();
+        modal = null;
+        toast(`Cycle ${state.cycle} started`);
+        render();
+      }},
+    ],
+  };
   render();
 }
 
@@ -585,7 +634,7 @@ function renderHome() {
   ];
 }
 
-function renderHistoryRow(h) {
+function renderHistoryRow(h, onDelete) {
   const d = new Date(h.date);
   const date = d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
   const summary = h.lifts.map((l) => {
@@ -593,10 +642,18 @@ function renderHistoryRow(h) {
     const reps = l.topReps != null ? l.topReps : '—';
     return `${l.name} ${l.topWeight}×${reps}`;
   }).join(', ');
-  return el('div', { class: 'history-row' }, [
+  const main = el('div', { class: 'h-main' }, [
     el('div', { class: 'h-date' }, [`${date} · C${h.cycle} W${h.week} ${days[h.day].short}`]),
     el('div', { class: 'h-summary' }, [summary]),
   ]);
+  const children = [main];
+  if (onDelete) {
+    children.push(el('button', {
+      class: 'h-del',
+      onClick: (e) => { e.stopPropagation(); onDelete(h); },
+    }, ['🗑']));
+  }
+  return el('div', { class: 'history-row' + (onDelete ? ' deletable' : '') }, children);
 }
 
 // ---------- Session ----------
@@ -724,12 +781,14 @@ function renderAssistanceSetsBlock(b, idx) {
   b.sets.forEach((s) => {
     const classes = ['step', 'fsl'];
     if (s.done) classes.push('done');
+    if (b.optional) classes.push('optional');
     const check = el('div', { class: 'check' }, [s.done ? '✓' : '']);
-    const pm = plateMath(s.weight);
+    const showPlates = s.weight > 0;
+    const pm = showPlates ? plateMath(s.weight) : null;
     const body = el('div', { class: 'body' }, [
       el('div', { class: 'label' }, [s.label]),
-      el('div', { class: 'main' }, [`${s.weight} × ${s.reps}`]),
-      el('div', { class: 'plates' + (pm.ok ? '' : ' warn') }, [formatPlates(pm)]),
+      el('div', { class: 'main' }, [s.weight > 0 ? `${s.weight} × ${s.reps}` : `BW × ${s.reps}`]),
+      showPlates ? el('div', { class: 'plates' + (pm.ok ? '' : ' warn') }, [formatPlates(pm)]) : null,
     ]);
     const repInput = el('input', {
       type: 'number', inputmode: 'numeric', class: 'reps-input',
@@ -761,9 +820,10 @@ function renderSettings() {
 
   const tmCard = el('div', { class: 'card' }, [
     el('h2', {}, ['Training Maxes']),
-    ...Object.entries(state.tms).map(([k, v]) =>
-      el('div', { class: 'tm-row' }, [
-        el('div', { class: 'name' }, [lifts[k].name, el('div', { class: 'muted', style: 'font-weight:400;font-size:12px;' }, [lifts[k].type === 'upper' ? 'Upper · +5/cycle' : 'Lower · +10/cycle'])]),
+    ...Object.entries(state.tms).map(([k, v]) => {
+      const inc = state.increments && state.increments[k] != null ? state.increments[k] : defaultIncrement(k);
+      return el('div', { class: 'tm-row' }, [
+        el('div', { class: 'name' }, [lifts[k].name, el('div', { class: 'muted', style: 'font-weight:400;font-size:12px;' }, [`${lifts[k].type === 'upper' ? 'Upper' : 'Lower'} · +${inc}/cycle`])]),
         el('div', { class: 'controls' }, [
           el('button', { onClick: () => adjustTm(k, -5), style: 'padding:6px 14px;min-height:40px;' }, ['−']),
           el('input', {
@@ -774,10 +834,47 @@ function renderSettings() {
           el('button', { onClick: () => adjustTm(k, 5), style: 'padding:6px 14px;min-height:40px;' }, ['+']),
           el('button', { class: 'danger', style: 'padding:6px 10px;min-height:40px;font-size:12px;', onClick: () => dropLiftTm(k) }, ['−10%']),
         ]),
-      ])
-    ),
+      ]);
+    }),
     el('div', { class: 'help' }, [
-      'TM = 90% of true 1RM. After each cycle, the app auto-adds +5 lb to upper / +10 lb to lower.',
+      'TM = 90% of true 1RM. At the end of each cycle you\'ll be asked to confirm new TMs (defaults below) — you can override per lift based on how the cycle felt.',
+    ]),
+  ]);
+
+  const incrementsCard = el('div', { class: 'card' }, [
+    el('h2', {}, ['Per-Cycle Increments']),
+    ...Object.keys(state.tms).map((k) => {
+      const inc = state.increments && state.increments[k] != null ? state.increments[k] : defaultIncrement(k);
+      return el('div', { class: 'tm-row' }, [
+        el('div', { class: 'name' }, [lifts[k].name]),
+        el('div', { class: 'controls' }, [
+          el('button', { onClick: () => { state.increments[k] = Math.max(0, inc - 2.5); saveState(); render(); }, style: 'padding:6px 14px;min-height:40px;' }, ['−']),
+          el('input', {
+            type: 'number', inputmode: 'decimal', class: 'tm-input',
+            value: String(inc),
+            onChange: (e) => {
+              const v = parseFloat(e.target.value);
+              if (Number.isFinite(v) && v >= 0) { state.increments[k] = v; saveState(); render(); }
+            },
+          }),
+          el('button', { onClick: () => { state.increments[k] = inc + 2.5; saveState(); render(); }, style: 'padding:6px 14px;min-height:40px;' }, ['+']),
+        ]),
+      ]);
+    }),
+    el('div', { class: 'help' }, [
+      'Suggested next-cycle bump per lift. ±2.5 lb steps; type any value. You\'ll still confirm per lift at cycle end.',
+    ]),
+  ]);
+
+  const assistanceCard = el('div', { class: 'card' }, [
+    el('h2', {}, ['Assistance']),
+    ...[1, 2].map((d) => el('div', { class: 'assist-day' }, [
+      el('div', { class: 'assist-day-label' }, [`Day ${d}`]),
+      ...((state.assistance && state.assistance[d]) || []).map((a, i) => renderAssistEditor(d, i, a)),
+      el('button', { class: 'add-fsl', onClick: () => addAssistanceItem(d) }, ['+ Add item']),
+    ])),
+    el('div', { class: 'help' }, [
+      'Edit assistance for each day. Sets-based items track weight — bump it manually when ready (no auto-progression).',
     ]),
   ]);
 
@@ -830,10 +927,137 @@ function renderSettings() {
   return [
     topbar('Settings', null, { icons: [back] }),
     tmCard,
+    incrementsCard,
     cycleCard,
+    assistanceCard,
     lifeCard,
     dataCard,
   ];
+}
+
+function renderAssistEditor(day, idx, a) {
+  const item = el('div', { class: 'assist-item' });
+
+  item.appendChild(el('input', {
+    type: 'text', class: 'assist-name', value: a.name || '',
+    placeholder: 'Name',
+    onChange: (e) => updateAssistance(day, idx, { name: e.target.value }),
+  }));
+
+  const kindRow = el('div', { class: 'assist-kind' }, [
+    el('button', {
+      class: a.kind === 'reps' ? 'primary' : 'ghost',
+      style: 'padding:8px 10px;min-height:38px;font-size:13px;flex:1;',
+      onClick: () => updateAssistance(day, idx, { kind: 'reps' }),
+    }, ['Reps target']),
+    el('button', {
+      class: a.kind === 'sets' ? 'primary' : 'ghost',
+      style: 'padding:8px 10px;min-height:38px;font-size:13px;flex:1;',
+      onClick: () => updateAssistance(day, idx, { kind: 'sets' }),
+    }, ['Sets × Reps × Weight']),
+  ]);
+  item.appendChild(kindRow);
+
+  if (a.kind === 'sets') {
+    const setsInput = el('input', {
+      type: 'number', inputmode: 'numeric',
+      value: String(a.sets ?? 3),
+      onChange: (e) => {
+        const v = parseInt(e.target.value, 10);
+        if (Number.isFinite(v) && v > 0) updateAssistance(day, idx, { sets: v });
+      },
+    });
+    const repsInput = el('input', {
+      type: 'text', value: String(a.reps ?? '8–10'),
+      onChange: (e) => updateAssistance(day, idx, { reps: e.target.value }),
+    });
+    const wInput = el('input', {
+      type: 'number', inputmode: 'decimal',
+      value: String(a.weight ?? 0),
+      onChange: (e) => {
+        const v = parseFloat(e.target.value);
+        if (Number.isFinite(v) && v >= 0) updateAssistance(day, idx, { weight: v });
+      },
+    });
+    item.appendChild(el('div', { class: 'assist-srw' }, [
+      el('div', { class: 'field' }, [el('label', {}, ['Sets']), setsInput]),
+      el('div', { class: 'field' }, [el('label', {}, ['Reps']), repsInput]),
+      el('div', { class: 'field' }, [el('label', {}, ['Lb']), wInput]),
+    ]));
+    const w = Number(a.weight) || 0;
+    item.appendChild(el('div', { class: 'assist-bumps' }, [
+      el('button', { onClick: () => updateAssistance(day, idx, { weight: Math.max(0, w - 5) }) }, ['−5']),
+      el('button', { onClick: () => updateAssistance(day, idx, { weight: Math.max(0, w - 2.5) }) }, ['−2.5']),
+      el('button', { onClick: () => updateAssistance(day, idx, { weight: w + 2.5 }) }, ['+2.5']),
+      el('button', { onClick: () => updateAssistance(day, idx, { weight: w + 5 }) }, ['+5']),
+    ]));
+  } else {
+    item.appendChild(el('input', {
+      type: 'text', value: a.target || '',
+      placeholder: 'e.g. 25–50 total reps',
+      onChange: (e) => updateAssistance(day, idx, { target: e.target.value }),
+    }));
+  }
+
+  item.appendChild(el('div', { class: 'assist-footer' }, [
+    el('label', { class: 'assist-optional' }, [
+      el('input', {
+        type: 'checkbox', checked: !!a.optional,
+        onChange: (e) => updateAssistance(day, idx, { optional: e.target.checked }),
+      }),
+      el('span', {}, ['Optional']),
+    ]),
+    el('button', {
+      class: 'danger',
+      style: 'padding:6px 12px;min-height:36px;font-size:13px;',
+      onClick: () => removeAssistanceItem(day, idx),
+    }, ['Remove']),
+  ]));
+
+  return item;
+}
+
+function updateAssistance(day, idx, patch) {
+  const item = state.assistance[day][idx];
+  Object.assign(item, patch);
+  if (patch.kind === 'sets') {
+    if (item.sets == null) item.sets = 3;
+    if (item.reps == null) item.reps = '8–10';
+    if (item.weight == null) item.weight = 0;
+  }
+  saveState();
+  render();
+}
+
+function addAssistanceItem(day) {
+  if (!state.assistance) state.assistance = { 1: [], 2: [] };
+  if (!state.assistance[day]) state.assistance[day] = [];
+  state.assistance[day].push({
+    id: cryptoId(),
+    name: 'New item',
+    kind: 'reps',
+    target: '',
+    optional: false,
+  });
+  saveState();
+  render();
+}
+
+function removeAssistanceItem(day, idx) {
+  const name = state.assistance[day][idx].name || 'this item';
+  modal = {
+    title: `Remove "${name}"?`,
+    actions: [
+      { label: 'Remove', kind: 'danger', onClick: () => {
+        state.assistance[day].splice(idx, 1);
+        saveState();
+        modal = null;
+        render();
+      }},
+      { label: 'Cancel', kind: 'ghost', onClick: () => { modal = null; render(); }},
+    ],
+  };
+  render();
 }
 
 function toggleDayDone(d) {
@@ -858,10 +1082,28 @@ function exportData() {
 // ---------- History ----------
 function renderHistory() {
   const back = el('button', { class: 'icon-btn', onClick: () => { view = 'home'; render(); } }, ['‹']);
+  const onDelete = (h) => {
+    const d = new Date(h.date);
+    const dateLabel = d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+    modal = {
+      title: 'Delete this session?',
+      body: `${dateLabel} · C${h.cycle} W${h.week} ${days[h.day].short}`,
+      actions: [
+        { label: 'Delete', kind: 'danger', onClick: () => {
+          state.history = state.history.filter((x) => h.id ? x.id !== h.id : x.date !== h.date);
+          saveState();
+          modal = null;
+          render();
+        }},
+        { label: 'Cancel', kind: 'ghost', onClick: () => { modal = null; render(); }},
+      ],
+    };
+    render();
+  };
   const card = el('div', { class: 'card' }, [
     state.history.length === 0
       ? el('div', { class: 'muted' }, ['No sessions logged yet.'])
-      : el('div', {}, state.history.slice().reverse().map(renderHistoryRow)),
+      : el('div', {}, state.history.slice().reverse().map((h) => renderHistoryRow(h, onDelete))),
   ]);
   return [topbar('History', `${state.history.length} session${state.history.length === 1 ? '' : 's'}`, { icons: [back] }), card];
 }
@@ -869,11 +1111,12 @@ function renderHistory() {
 // ---------- Modal ----------
 function renderModal() {
   const backdrop = el('div', { class: 'modal-backdrop', onClick: (e) => {
-    if (e.target.classList.contains('modal-backdrop')) { modal = null; render(); }
+    if (e.target.classList.contains('modal-backdrop') && !modal.persistent) { modal = null; render(); }
   }});
   const m = el('div', { class: 'modal' }, [
     el('h3', {}, [modal.title]),
     modal.body ? el('div', { class: 'muted' }, [modal.body]) : null,
+    modal.content ? modal.content() : null,
     el('div', { class: 'actions' }, modal.actions.map((a) =>
       el('button', { class: a.kind === 'danger' ? 'danger' : (a.kind === 'ghost' ? 'ghost' : 'primary'), onClick: a.onClick }, [a.label])
     )),
@@ -884,6 +1127,14 @@ function renderModal() {
 
 // ---------- Boot ----------
 render();
+
+// If a prior session ended Cycle's Week 4 but the user dismissed/refreshed before
+// confirming the next-cycle TMs, re-fire the modal so they aren't stuck.
+if (!session && state.week === 4
+    && state.daysDoneThisWeek.includes(1)
+    && state.daysDoneThisWeek.includes(2)) {
+  cycleCompleteModal();
+}
 
 // Re-render timer-driven UI on visibility change (handles screen-lock returns)
 document.addEventListener('visibilitychange', () => {
