@@ -1,3 +1,6 @@
+// Bumped on every meaningful release. Must match sw.js CACHE so PWA users get fresh assets.
+const APP_VERSION = 5;
+
 // ---------- Storage ----------
 const STATE_KEY = '531-state-v1';
 const SESSION_KEY = '531-session-v1';
@@ -10,11 +13,11 @@ const defaultState = {
   daysDoneThisWeek: [],   // subset of [1, 2]
   assistance: {
     1: [
-      { id: 'a-d1-pull', name: 'Pull-ups', kind: 'reps', target: '25–50 total reps', optional: false },
+      { id: 'a-d1-pull', name: 'Pull-ups', kind: 'progression', freshMax: 5, weight: 0, lastMaxTest: null, optional: false },
       { id: 'a-d1-face', name: 'Face pulls / band pull-aparts', kind: 'reps', target: '30–50 total reps', optional: true },
     ],
     2: [
-      { id: 'a-d2-chin', name: 'Chin-ups', kind: 'reps', target: '25–50 total reps', optional: false },
+      { id: 'a-d2-chin', name: 'Chin-ups', kind: 'progression', freshMax: 5, weight: 0, lastMaxTest: null, optional: false },
       { id: 'a-d2-row', name: 'Barbell rows', kind: 'sets', sets: 3, reps: '8–10', weight: 125, optional: false },
       { id: 'a-d2-push', name: 'Dips or push-ups', kind: 'reps', target: '2–3 sets', optional: true },
     ],
@@ -193,6 +196,47 @@ function buildSession(dayNum) {
           done: false,
         })),
       });
+    } else if (a.kind === 'progression') {
+      const rx = progressionPrescription(a);
+      const phaseLabel = rx.phase === 3 ? 'Phase 3' : rx.phase === 2 ? 'Phase 2' : 'Build base';
+      const makeSets = (b) => Array.from({ length: b.sets }, (_, i) => ({
+        id: cryptoId(),
+        label: `Set ${i + 1}`,
+        weight: b.weight,
+        reps: b.reps,
+        done: false,
+      }));
+      if (rx.blocks.length === 1) {
+        const b = rx.blocks[0];
+        const target = b.weight > 0
+          ? `${b.sets} × ${b.reps} @ +${b.weight} lb · ${phaseLabel}`
+          : `${b.sets} × ${b.reps} BW · ${phaseLabel} (max ${rx.max})`;
+        blocks.push({
+          kind: 'assistanceSets',
+          name: a.name,
+          target,
+          optional: !!a.optional,
+          sets: makeSets(b),
+        });
+      } else {
+        // Phase 3: working + backoff as separate cards
+        const work = rx.blocks[0];
+        const back = rx.blocks[1];
+        blocks.push({
+          kind: 'assistanceSets',
+          name: a.name,
+          target: `${work.sets} × ${work.reps} @ +${work.weight} lb · Phase 3 (max ${rx.max})`,
+          optional: !!a.optional,
+          sets: makeSets(work),
+        });
+        blocks.push({
+          kind: 'assistanceSets',
+          name: `${a.name} — backoff`,
+          target: `${back.sets} × ${back.reps} BW`,
+          optional: !!a.optional,
+          sets: makeSets(back),
+        });
+      }
     } else {
       blocks.push({
         kind: 'assistance',
@@ -276,6 +320,59 @@ function finishSession() {
 
 function defaultIncrement(lift) {
   return lifts[lift].type === 'upper' ? 5 : 10;
+}
+
+// Bodyweight pull-up / chin-up progression (Phase 2 → Phase 3).
+// Single source of truth: derives the prescription from the user's freshMax.
+const PHASE2_TABLE = { 5: [7, 2], 6: [6, 3], 7: [6, 3], 8: [6, 4], 9: [6, 4] };
+
+function suggestStartingWeight(max) {
+  if (max <= 10) return 10;
+  if (max <= 13) return 15;
+  if (max <= 17) return 20;
+  return 25;
+}
+
+function progressionPrescription(item) {
+  const max = Math.max(0, parseInt(item.freshMax, 10) || 0);
+  if (max < 5) {
+    return { phase: 1, max, blocks: [{ sets: 1, reps: max || 1, weight: 0 }] };
+  }
+  if (max < 10) {
+    const [sets, reps] = PHASE2_TABLE[max];
+    return { phase: 2, max, blocks: [{ sets, reps, weight: 0 }] };
+  }
+  const weight = Math.max(0, Number(item.weight) || 0);
+  return {
+    phase: 3,
+    max,
+    blocks: [
+      { sets: 3, reps: 5, weight },
+      { sets: 2, reps: Math.max(1, max - 3), weight: 0 },
+    ],
+  };
+}
+
+// Convert legacy reps-based Pull-ups/Chin-ups items to the progression kind.
+// Run once on boot; idempotent.
+function migrateAssistanceProtocol() {
+  if (!state.assistance) return false;
+  let changed = false;
+  [1, 2].forEach((d) => {
+    const list = state.assistance[d];
+    if (!Array.isArray(list)) return;
+    list.forEach((a) => {
+      if (a.kind === 'reps' && (a.name === 'Pull-ups' || a.name === 'Chin-ups')) {
+        a.kind = 'progression';
+        a.freshMax = 5;
+        a.weight = 0;
+        a.lastMaxTest = null;
+        delete a.target;
+        changed = true;
+      }
+    });
+  });
+  return changed;
 }
 
 function cycleCompleteModal() {
@@ -607,7 +704,7 @@ function renderHome() {
     el('h2', {}, ['Recent']),
     state.history.length === 0
       ? el('div', { class: 'muted' }, ['No sessions logged yet.'])
-      : el('div', {}, state.history.slice(-5).reverse().map(renderHistoryRow)),
+      : el('div', {}, state.history.slice(-5).reverse().map((h) => renderHistoryRow(h))),
   ]);
 
   const tmCard = el('div', { class: 'card' }, [
@@ -620,6 +717,8 @@ function renderHome() {
     ),
   ]);
 
+  const buildFooter = el('div', { class: 'build-footer' }, [`build ${APP_VERSION}`]);
+
   return [
     topbar('5/3/1', null, {
       icons: [
@@ -631,6 +730,7 @@ function renderHome() {
     el('div', { style: 'display:flex; flex-direction:column; gap:10px; margin-bottom:18px;' }, [startBtn, switchBtn]),
     recentCard,
     tmCard,
+    buildFooter,
   ];
 }
 
@@ -947,18 +1047,25 @@ function renderAssistEditor(day, idx, a) {
   const kindRow = el('div', { class: 'assist-kind' }, [
     el('button', {
       class: a.kind === 'reps' ? 'primary' : 'ghost',
-      style: 'padding:8px 10px;min-height:38px;font-size:13px;flex:1;',
+      style: 'padding:8px 6px;min-height:38px;font-size:12px;flex:1;',
       onClick: () => updateAssistance(day, idx, { kind: 'reps' }),
     }, ['Reps target']),
     el('button', {
       class: a.kind === 'sets' ? 'primary' : 'ghost',
-      style: 'padding:8px 10px;min-height:38px;font-size:13px;flex:1;',
+      style: 'padding:8px 6px;min-height:38px;font-size:12px;flex:1;',
       onClick: () => updateAssistance(day, idx, { kind: 'sets' }),
-    }, ['Sets × Reps × Weight']),
+    }, ['Sets × Reps × Wt']),
+    el('button', {
+      class: a.kind === 'progression' ? 'primary' : 'ghost',
+      style: 'padding:8px 6px;min-height:38px;font-size:12px;flex:1;',
+      onClick: () => updateAssistance(day, idx, { kind: 'progression' }),
+    }, ['BW progression']),
   ]);
   item.appendChild(kindRow);
 
-  if (a.kind === 'sets') {
+  if (a.kind === 'progression') {
+    item.appendChild(renderProgressionEditor(day, idx, a));
+  } else if (a.kind === 'sets') {
     const setsInput = el('input', {
       type: 'number', inputmode: 'numeric',
       value: String(a.sets ?? 3),
@@ -1025,8 +1132,113 @@ function updateAssistance(day, idx, patch) {
     if (item.reps == null) item.reps = '8–10';
     if (item.weight == null) item.weight = 0;
   }
+  if (patch.kind === 'progression') {
+    if (item.freshMax == null) item.freshMax = 5;
+    if (item.weight == null) item.weight = 0;
+    if (item.lastMaxTest === undefined) item.lastMaxTest = null;
+    delete item.target;
+    delete item.sets;
+    delete item.reps;
+  }
+  // Auto-suggest a starting weight when freshMax first crosses into Phase 3
+  if (item.kind === 'progression' && (parseInt(item.freshMax, 10) || 0) >= 10 && (Number(item.weight) || 0) === 0) {
+    item.weight = suggestStartingWeight(parseInt(item.freshMax, 10));
+  }
+  // Returning to Phase 2 zeroes the weight (it's irrelevant there and avoids a stale phase-3 weight resurfacing)
+  if (item.kind === 'progression' && (parseInt(item.freshMax, 10) || 0) < 10 && patch.freshMax !== undefined) {
+    item.weight = 0;
+  }
   saveState();
   render();
+}
+
+function renderProgressionEditor(day, idx, a) {
+  const wrap = el('div', { class: 'progression-editor' });
+  const max = parseInt(a.freshMax, 10) || 0;
+  const rx = progressionPrescription(a);
+
+  // Phase badge + prescription line
+  const phaseLabel = rx.phase === 3 ? 'Phase 3 — weighted' : rx.phase === 2 ? 'Phase 2 — bodyweight' : 'Build base';
+  wrap.appendChild(el('div', { class: 'prog-phase' }, [
+    el('span', { class: `phase-badge phase-${rx.phase}` }, [phaseLabel]),
+  ]));
+
+  let prescribed;
+  if (rx.blocks.length === 1) {
+    const b = rx.blocks[0];
+    prescribed = b.weight > 0 ? `${b.sets} × ${b.reps} @ +${b.weight} lb` : `${b.sets} × ${b.reps} BW`;
+  } else {
+    const w = rx.blocks[0], bk = rx.blocks[1];
+    prescribed = `${w.sets} × ${w.reps} @ +${w.weight} lb · then ${bk.sets} × ${bk.reps} BW`;
+  }
+  wrap.appendChild(el('div', { class: 'prog-prescribed' }, [prescribed]));
+
+  // Fresh max stepper
+  wrap.appendChild(el('div', { class: 'prog-row' }, [
+    el('label', {}, ['Fresh max']),
+    el('div', { class: 'prog-stepper' }, [
+      el('button', { onClick: () => updateAssistance(day, idx, { freshMax: Math.max(0, max - 1) }) }, ['−1']),
+      el('input', {
+        type: 'number', inputmode: 'numeric', class: 'prog-input',
+        value: String(max),
+        onChange: (e) => {
+          const v = parseInt(e.target.value, 10);
+          if (Number.isFinite(v) && v >= 0) updateAssistance(day, idx, { freshMax: v });
+        },
+      }),
+      el('button', { onClick: () => updateAssistance(day, idx, { freshMax: max + 1 }) }, ['+1']),
+    ]),
+  ]));
+
+  // Weight stepper (Phase 3 only)
+  if (rx.phase === 3) {
+    const w = Number(a.weight) || 0;
+    wrap.appendChild(el('div', { class: 'prog-row' }, [
+      el('label', {}, ['Weight (lb)']),
+      el('div', { class: 'prog-stepper' }, [
+        el('button', { onClick: () => updateAssistance(day, idx, { weight: Math.max(0, w - 5) }) }, ['−5']),
+        el('input', {
+          type: 'number', inputmode: 'decimal', class: 'prog-input',
+          value: String(w),
+          onChange: (e) => {
+            const v = parseFloat(e.target.value);
+            if (Number.isFinite(v) && v >= 0) updateAssistance(day, idx, { weight: v });
+          },
+        }),
+        el('button', { onClick: () => updateAssistance(day, idx, { weight: w + 5 }) }, ['+5']),
+      ]),
+    ]));
+    wrap.appendChild(el('div', { class: 'prog-hint' }, [
+      'Hit 3×5 clean → +5 next session. Miss reps → repeat. Miss twice → −5 to rebuild.',
+    ]));
+  }
+
+  // Last tested
+  const tested = a.lastMaxTest ? new Date(a.lastMaxTest) : null;
+  const daysAgo = tested ? Math.floor((Date.now() - tested.getTime()) / 86400000) : null;
+  const testedLabel = !tested
+    ? 'Not tested yet'
+    : daysAgo === 0 ? 'Tested today'
+    : daysAgo === 1 ? 'Tested 1 day ago'
+    : `Tested ${daysAgo} days ago`;
+  const retestWindow = rx.phase === 3 ? '4–6 weeks' : '2 weeks';
+  wrap.appendChild(el('div', { class: 'prog-row prog-tested' }, [
+    el('label', {}, [testedLabel]),
+    el('button', {
+      style: 'padding:6px 12px;min-height:34px;font-size:13px;',
+      onClick: () => updateAssistance(day, idx, { lastMaxTest: new Date().toISOString() }),
+    }, ['Mark tested today']),
+  ]));
+  wrap.appendChild(el('div', { class: 'prog-hint' }, [`Re-test fresh max every ${retestWindow}.`]));
+
+  // Reset to Phase 2
+  wrap.appendChild(el('button', {
+    class: 'ghost',
+    style: 'padding:6px 12px;min-height:34px;font-size:13px;align-self:flex-start;',
+    onClick: () => updateAssistance(day, idx, { freshMax: 5, weight: 0 }),
+  }, ['Reset to Phase 2 start (max 5)']));
+
+  return wrap;
 }
 
 function addAssistanceItem(day) {
@@ -1126,6 +1338,7 @@ function renderModal() {
 }
 
 // ---------- Boot ----------
+if (migrateAssistanceProtocol()) saveState();
 render();
 
 // If a prior session ended Cycle's Week 4 but the user dismissed/refreshed before

@@ -450,3 +450,73 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; marg
   font-size: 18px;
   padding: 10px 8px;
 }
+
+/* Bodyweight progression editor */
+.progression-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.prog-phase { display: flex; }
+.phase-badge {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--muted);
+}
+.phase-badge.phase-2 { background: var(--accent-dim); color: var(--accent); border-color: transparent; }
+.phase-badge.phase-3 { background: var(--good); color: #062b14; border-color: transparent; }
+.prog-prescribed {
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: -0.2px;
+  padding: 10px 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.prog-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.prog-row label {
+  font-size: 13px;
+  color: var(--muted);
+}
+.prog-stepper { display: flex; align-items: center; gap: 6px; }
+.prog-stepper button {
+  padding: 6px 12px;
+  min-height: 36px;
+  font-size: 13px;
+}
+.prog-input {
+  width: 70px;
+  text-align: center;
+  font-weight: 700;
+  font-size: 16px;
+  padding: 8px 6px;
+}
+.prog-hint {
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.4;
+}
+.prog-tested label { color: var(--text); font-size: 14px; }
+
+.build-footer {
+  text-align: center;
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  padding: 24px 0 8px;
+  font-variant-numeric: tabular-nums;
+}
